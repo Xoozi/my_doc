@@ -1,5 +1,7 @@
 #SQLite学习笔记
 
+[TOC]
+
 ##杂记
 - sqlite 的关键字 如select insert integer real 之类的不区分大小写 但名称 常量区分
 - 数据库清理 sqlite3 test.db vacuum
@@ -359,16 +361,13 @@ alter table table_name {rename to new_table_name | add column column_definitions
         order by f.name;
         ```
 
+        差集操作输入两个关系A 和 B, 找出所有在A但不在B的行, 把前例的intersect改成
+        except可以找出episodes介于3~5而不在前10位的食品
 
-            差集操作输入两个关系A 和 B, 找出所有在A但不在B的行, 把前例的intersect改成except可以找出
-            episodes介于3~5而不在前10位的食品
-
-
-        13)条件结果
-
-            case表达式允许在select语句中处理各种情况, 它有两种形式:
-
-            (1)接收静态值并列出各种情况下的case返回值
+	- 条件结果
+   	case表达式允许在select语句中处理各种情况, 它有两种形式:
+    	- 接收静态值并列出各种情况下的case返回值
+		```sql
                 case value
                     when x then value_x
                     when y then value_y
@@ -387,51 +386,132 @@ alter table table_name {rename to new_table_name | add column column_definitions
             where description is not null
             order by name
             limit 10;
+        ```
 
+        - 第二种case形式允许when条件中有表达式
+        ```sql
+            case 
+                when condition1 then value1
+                when condition2 then value2
+                when condition3 then value3
+                else default_value
+            end
 
-            (2)第二种case形式允许when条件中有表达式
-                case 
-                    when condition1 then value1
-                    when condition2 then value2
-                    when condition3 then value3
-                    else default_value
-                end
-
-
-                select name, (select
-                               case
-                                 when count(*) > 4 then 'Very High'
-                                 when count(*) = 4 then 'High'
-                                 when count(*) in (2,3) then 'Moderate'
-                                 else 'Low'
-                               end
-                             from foods_episodes
-                             where food_id=f.id) frequency
-                from foods f
-                where frequency like '%High';
-        
-    处理sqlite中的 null
+            select name, (select
+                           case
+                             when count(*) > 4 then 'Very High'
+                             when count(*) = 4 then 'High'
+                             when count(*) in (2,3) then 'Moderate'
+                             else 'Low'
+                           end
+                         from foods_episodes
+                         where food_id=f.id) frequency
+            from foods f
+            where frequency like '%High';
+         ```
+	- 处理sqlite中的 null
         sqlite中一些null的关键点
-        1)sqlite中的null不是值,只是缺失信息的占位符
-        2)null 不是真也不是假 也不是零, 只是它本身
-        3)sqlite的逻辑运算采用三值逻辑 true false 和null 关系表见121页
-        4)可以用 is null或者 is not null检查null是否存在
-        5)最重要一条, 由于2) 将null与其他值比较基本都会返回false
+        1. sqlite中的null不是值,只是缺失信息的占位符
+        2. null 不是真也不是假 也不是零, 只是它本身
+        3. sqlite的逻辑运算采用三值逻辑 true false 和null 关系表见121页
+        4. 可以用 is null或者 is not null检查null是否存在
+        5. 最重要一条, 由于2) 将null与其他值比较基本都会返回false
+        ```sql
             select * 
             from mytable
             where myvalue = null;
-            通常不会返回任何结果 因为null不等于任何值
+            --通常不会返回任何结果 因为null不等于任何值
 
-            但作为变通 可以用is 操作符
+            --但作为变通 可以用is 操作符
             select null is null; 会返回1
             select null = null; 则什么都不返回
+        ```
 
-        6)coalesce 函数 将一组值作为输入 返回第一个非null
+        6. coalesce 函数 将一组值作为输入 返回第一个非null
+        ```sql
             select coalesce(null, 7, null, 4);
             返回7
+        ```
 
-        7)nullif 函数输入两个参数, 如果两个参数相同 返回null否则返回第一个参数
+        7. nullif 函数输入两个参数, 如果两个参数相同 返回null否则返回第一个参数
+        ```sql
             select nullif(1, 1);
             null
             select nullif(1, 2);
             1
+        ```
+        
+        
+##插入记录
+使用insert命令想表中插入记录. insert在单表上工作, 一次插入一条记录
+```sql
+insert into table (column_list) values(value_list);
+```
+- 插入单行
+```sql
+insert into foods (name, type_id) values('Cinnamon Bobka', 1);
+```
+如果在insert语句中给所有字段提供值, 可以省略字段列表
+```sql
+insert into foods values(null, 1, 'Blueberry Bobka');
+```
+注意此处给主键传入null, 利用其自动递增的性质
+
+- 插入一组行
+子查询可以用在insert语句中, 作为值列表的一部分.
+指定子查询为值列表时, 实际上是在插入一组行
+```sql
+insert into foods
+values (null,
+		(select id from food_types where name='Bakery')
+        'Blackberry Bobka');
+这里就不用硬编码type_id了
+```
+```sql
+insert into foods
+select last_insert_rowid()+1, type_id, name
+from foods
+where name='Chocolate Bobka';
+本例使用select完全取代了值列表 因为与要插入的字段完全匹配
+这里last_insert_rowid()也是不好的用法, 因为如果上次没插入
+会返回0, 应该用null来让主键自增
+```
+- 插入多行
+使用select形式的insert可以一次插入多行, 只要字段匹配, insert可以插入结果集的所有行
+```sql
+create table foods2 (id int, type_id int, name text);
+insert into foods2 select * from foods;
+```
+```sql
+create temp table  list as
+select
+	f.name food,
+    t.name name,
+	(select count(episode_id)
+    	from foods_episode
+        where food_id=f.id) episodes
+from foods f, food_type t
+where f.type_id=t.id;
+注意这种方式复制的表, 源表的约束并未一起复制
+```
+
+##更新记录
+update命令用于更新表中的记录, 该命令可以修改一个表中一行或多行的一个或多个字段.
+```sql
+update table set update_list where predicate;
+```
+update_list是一个或多个"字段赋值"的列表, 其格式为column_name=value,
+where 和后面的谓词对要修改的行进行过滤
+
+```sql
+update foods set name='CHOCOLATE BOBKA'
+where name='Chocolate Bobka'
+```
+update语句非常简单直接, 但需要注意约束, 比如unique就可以使得update被终止
+
+##删除记录
+最简单的sql命令
+```sql
+delete from table where predicate;
+```
+就像update少了set部分, 只需要用where子句的谓词来过滤删除条件
