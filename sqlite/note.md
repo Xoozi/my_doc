@@ -10,6 +10,8 @@
 	- x'01'
 	- x'0fff'
 
+_ _ _
+
 
 ##创建表:
 
@@ -21,6 +23,9 @@ create [temp] table table_name (column_definitions [, constraints]);
 - column_definitions是由逗号分隔的字段列表组成 每个字段定义包括一个名称, 一个域(类型)和一个逗号分隔的字段约束
 	- sqlite有五种本地类型:integer real text blob null约束用来控制什么样的值可以储存在表中或字段中
 
+- - -
+
+
 ##修改表:
 
 ```sql
@@ -28,6 +33,8 @@ alter table table_name {rename to new_table_name | add column column_definitions
 ```
 - rename to 改表名
 - add column 添加列
+
+_ _ _
 
 
 ##查询表:
@@ -414,7 +421,7 @@ alter table table_name {rename to new_table_name | add column column_definitions
         1. sqlite中的null不是值,只是缺失信息的占位符
         2. null 不是真也不是假 也不是零, 只是它本身
         3. sqlite的逻辑运算采用三值逻辑 true false 和null 关系表见121页
-        4. 可以用 is null或者 is not null检查null是否存在
+        4. 可以用 is null或者 is not null检查null是否存在, 不能用null=null因为null不等于任何值甚至不等于其他null
         5. 最重要一条, 由于2) 将null与其他值比较基本都会返回false
         ```sql
             select * 
@@ -440,8 +447,8 @@ alter table table_name {rename to new_table_name | add column column_definitions
             select nullif(1, 2);
             1
         ```
-        
-        
+---
+
 ##插入记录
 使用insert命令想表中插入记录. insert在单表上工作, 一次插入一条记录
 ```sql
@@ -494,6 +501,7 @@ from foods f, food_type t
 where f.type_id=t.id;
 注意这种方式复制的表, 源表的约束并未一起复制
 ```
+---
 
 ##更新记录
 update命令用于更新表中的记录, 该命令可以修改一个表中一行或多行的一个或多个字段.
@@ -509,9 +517,241 @@ where name='Chocolate Bobka'
 ```
 update语句非常简单直接, 但需要注意约束, 比如unique就可以使得update被终止
 
+---
+
 ##删除记录
 最简单的sql命令
 ```sql
 delete from table where predicate;
 ```
 就像update少了set部分, 只需要用where子句的谓词来过滤删除条件
+
+##数据完整性
+- 数据完整性用于定义和保护表内部或表之间的数据关系. 一般有四种完整性:
+	- 域完整性,  域完整性控制字段内的值
+	- 实体完整性, 实体完整性控制表中的行
+	- 引用完整性, 引用完整性控制表之间的行----就是外键关系
+	- 用户定义完整性, 用户定义完整性可以包罗万象.
+- 数据完整性是通过约束实现的, 他们可以和字段定义或表定义关联起来
+	- 字段级约束包括: not null, unique, primary key, foreign key, check, collate
+	- 表一级约束: primary key
+- 实体完整性, 
+    <p>关系理论要求数据库所有的域都是唯一的, 可以定位的. 域要可寻址
+它相应的行必须是可寻址的. 行必须在某种方式上是唯一的, 这就是主键的功能.</p>
+    <p>主键由至少带有unique约束的一个或一组字段组成.</p>
+    - **惟一性约束**unique约束要求一个或一组字段的所有值均不同. 如果试图插入或更新一个已经存在的值, 数据库会引发一个约束非法, 并终止操作.
+    ```sql
+    CREATE TABLE contacts ( id INTEGER PRIMARY KEY,
+                            name TEXT NOT NULL COLLATE NOCASE,
+                            phone TEXT NOT NULL DEFAULT 'UNKNOWN',
+                            UNIQUE (name,phone) );
+    注意这段代码定义的惟一性约束, 是对name和phone的联合的
+
+    insert into contacts (name, phone) values('Jerry', 'UNKNOWN');
+
+    insert into contacts (name) values('Jerry');
+    SQL error:columns name, phone 
+    ```
+    - **主键约束**SQLite中, 定义一个表时总会指定一个主键, 无论自己是否定义. 它是一个64-bit整型数, 有两个别名_rowid_和oid, 它默认按增序自动生成.如果在integer primary key 后加上autoincrement, SQLite采用不同的主键生成算法,基本上阻止了rowid回收(详细去看131页)
+        - 有一点要注意, 和惟一性约束一样, 主键约束可以定义在多个字段中,主键也不一定需要是整型, 如果主键是整型, SQLite会把它处理成,rowid的别名如果设置其他类型作为主键, SQLite仍会在内部维护rowid.
+        ```sql
+        create table pkey(x text, y text, primary key(x, y));
+        本例的主键从技术上讲横跨两个字符串字段, 由于sqlite
+        总是自己维护rowid. 很多数据库专家建议使用实际字段作为主键
+        ```
+
+- 域完整性
+    <p>最简单的域完整性定义就是字段值的类型定义</p>
+    <p>SQLite的类型检查有争议, 11章再讨论</p>
+    <p>先讨论简单内容, 默认值, not null约束, check约束, 排序规则</p>
+
+    - 默认值 default只是一个约束, 它保证该字段有值, 并在需要时出现. 它符合域完整性, 因为它为处理字段中的null提供了一种策略--在insert时语句没有为字段指定值, SQLite会为它赋值null, 如果定义表时有指定default, 则使用这个值.
+        - 预定义保留字, 用于即时生成日期和时间.
+        - current_date, 生成(YYYY-MM-DD)的当前日期
+        - current_time, 生成(HH:MM:SS)的当前时间
+        - current_timestamp, 生成(YYYY-MM-DD HH:MM:SS)
+        ```sql
+        create table times(id int,
+            date not null default current_date,
+            time not null default current_time,
+            timestamp not null default current_timestamp);
+        ```
+    - NOT NULL约束
+    insert 语句向声明为not null的字段插入null会引发一个约束非法, 所以经常将not null约束和default配合使用来保证insert语句总能安全使用, 又能排除null.
+
+    - check约束
+    check约束允许通过定义表达式来测试要插入或更新的字段值, 如果该值不满足设定的表达式, 数据库会报约束违反错误, 通过它可以自定义unique或not null以外的数据完整性以满足特定应用.如果发现check约束不能完全表达的内容, 可以试试触发器.
+    ```sql
+    create table contacts
+    (id integer primary key,
+    name text not null,
+    phone text not null default 'UNKNOWN',
+    unique(name, phone)
+    check(length(phone) >= 7));
+    本例中, 任何试图插入或者更新语句中phone的值如果小于七个字符, 都会触发违反约束
+    ```
+    ```sql
+  	create table foo(
+    x integer,
+    y integer check(y > x),
+    z integer check(z > abs(y))
+    );
+    也可以在一条语句中多个check 使用语句中其他符号名
+    ```
+	- 外键约束
+	外键约束用于确保表间关系完整性, 它确保了一个表中的关键值必须从另一个表中引用, 且该数据必须在另一个表中实际存在.
+    ```sql
+    create table food_types(
+    id integer primary key,
+    name text
+    );
+    create table foods(
+    id integer primary key,
+    type_id integer references food_types(id)
+    on delete restrict
+    deferrable initially deferred,
+    name text);
+    ```
+    ```sql
+    create table table_name
+    (column_definition references foreign_table(column_name)
+    	on {delete|update} integrity_action
+        [not] deferrable [initially {deferred|immediate},]
+    );
+    ```
+    外键语法结构
+		1. 告知SQLite该字段使用了何表的何字段
+		2. 完整性约束 在更新或删除时, 触发何种动作
+			- restrict 完全阻止 触发终止事务
+			- set null 如果父值被删除或不存在了, 剩余子值改为null
+			- set default 如果父值被删除或不存在了, 剩余子值改为默认值
+			- cascade 更新父值时, 更新所有匹配的子值, 删除父值时删除所有子值, 注意删除可能出现未定义的结果
+            - no action 使用一种松弛的办法, 不干涉操作执行, 只是观察变化, 在整个语句(如果约束定义为deferred的事务也一样)的结尾报出错误.
+        3. deferrable 子句, 控制定义的约束是立即执行还是延迟到整个事务结束
+        ___
+    - 排序规则
+    排序规则涉及文本值如何比较, 有些排序规则可能是不区分大小写的, 另一些大小写敏感.
+    关键词collate定义字段的排序规则:
+    	1. 默认按二进制比较使用memcmp
+    	2. nocase非大小写敏感
+    	3. reverse和二进制排序规则相反
+    ```sql
+    create table contacts
+    (id integer primary key,
+    name text not null collate nocase,
+    phone text not null default 'UNKNOWN',
+    unique(name, phone)
+    check(length(phone) >= 7));
+    ```
+    ___
+    - 存储类
+    SQLite有5个原始数据类型, 被称为储存类, 是类型和数据类型的同义词
+    | 名称 | 说明 |
+    |---:---|---:---|
+    |integer|整数值的最大范围是8字节 但SQLite实际是根据其大小自动控制所占的字节|
+    |real|实数是10进制, 8字节长度的浮点数|
+    |text|文本是字符数据SQLite支持包括UTF-8和UTF-16的字符编码, 字符串默认最大长度1,000,000,000字节|
+    |blob|二进制大对象默认最大长度1,000,000,000字节|
+    |null|null表示无值, SQLite具有null的完全支持|
+
+	SQLite函数typeof()根据值的表示法返回其存储类,
+    ```sql
+    select typeof(3.14), typeof('3.14'), typeof(314), typeof(x'3142'), typeof(null);
+    real 	text 	integer		blob	null
+    ```
+    **SQLite中一个字段可以包含不同存储类的值, 这也是SQLite处理数据与其他数据库最大的不同**:
+    ```sql
+   	create table domain(x);
+    insert into domain values (3.142);
+    insert into domain values ('3.142');
+    insert into domain values (3142);
+    insert into domain values (x'3142');
+    insert into domain values (null);
+    select rowid, x, typeof(x) from domain;
+    
+    rowid		x		typeof(x)
+    1			3.142	real
+    2			3.142	text
+    3			3142	integer
+    4			1B		blob
+    5			null	null
+    ```
+    这种机制会造成一些麻烦, 比如比较时, 细节可见115页, 更多细节见11章
+    ___
+###视图
+	视图即虚拟表, 也称派生表, 因它们的内容都派生子其他表的查询结果, 基本表的内容是持久的而视图的内容是在使用时动态产生的
+    ```sql
+    create view name as select-stmt;
+    视图的名称有name指定, 由select-stmt定义. 最终生成的视图看起来像名为name的基本表
+    ```
+    ```sql
+    总是编写这种多表查询让人厌烦
+    select f.name, ft.name, e.name
+    from foods f
+    inner join food_types ft on f.type_id=ft.id
+    inner join foods_episodes fe on f.id=fe.food_id
+    inner join episodes e on fe.episode_id=e.id;
+
+	可以创建视图来简化查询
+    create view details as
+    select f.name as fd, ft.name as tp, e.name as ep, e.season as ssn
+    from foods f
+    inner join food_types ft on f.type_id=ft.id
+    inner join foods_episodes fe on f.id=fe.food_id
+    inner join episodes e on fe.episode_id=e.id;
+	
+    像查询基本表一样查询视图
+    select fd as Food, ep as Episode
+    from details where ssn=7 and tp like 'Drinks';
+
+	删除视图
+    drop view name;
+    ```
+    通常关系数据库支持可更新的视图, 可以向其insert或者update, 修改会应用到底层表中, 但SQLite并不支持可更新视图, 不过可以用触发器达到类似的目的.
+	___
+###索引
+索引是一种用来加速查询的结构.
+```sql
+select * from foods where name='JujyFruit';
+```
+当数据库搜索匹配的行时, 执行这种查询的默认方式是顺序扫描, 如果频繁进行这种查询, 且foods表非常大, 使用索引就很有必要了.
+```sql
+create index [unique] index_name on table_name(columns);
+```
+columns是一个字段或以逗号分隔的多个字段
+如果使用关键字unique将会在索引上添加约束, 索引中的所有值必须是唯一的
+unique关键字覆盖index的所有字段, 不管是联合值还是单个值都必须惟一
+```sql
+drop index index_name
+```
+删除索引
+	- 排序规则
+		索引中每个字段都有相关排序规则, 如要在foods.name上创建大小写不敏感的索引可以如下:
+        ```sql
+        create index foods_name_idx on foods(name collate nocase);
+        ```
+    - 使用索引
+    	对下列情况, SQLite会使用单个字段索引:
+        ```sql
+        column {=|>|>=|<=|<} expression
+        expression {=|>|>=|<=|<} column
+        column in  (expression-list)
+        column in  (subquery)
+       	```
+        多字段索引有更复杂的条件
+        多字段索引从左往右使用字段, 直到where子句中没有有效条件
+        ```sql
+        create table foo(a, b, c, d);
+        create index foo_idx on foo(a, b, c, d);
+        select * from foo where a=1 and b=2 and d=4;
+        上面这句只有第一和第二个条件使用索引, 第三个条件因为索引字段没有连续使用而简单的放弃了
+        ```
+        不等式条件也会终止索引的从左往右使用
+        ```sql
+        select * from foo where a>1 and b=2 and c=3 and d=4;
+        由于a>1用了不等号, 它之后的字段被认为是不合格的
+        ```
+    - 索引使用的注意事项:
+    	1. 当使用索引, 一定要有理由确保可以获得性能提升. 选择好的索引是非常重要的, 分布凌乱的索引会造成反效果.
+        2. 而且索引会增加数据库的大小, 对表中所有字段创建索引, 可能会使得表的大小翻倍.
+        3. 索引的维护是有代价的, 进行insert update delete时, 除了修改表, 也需要修改对应的索引. 虽然索引可以加快查询速度, 却会降低其他操作的速度.
