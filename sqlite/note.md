@@ -694,7 +694,7 @@ rowid		x		typeof(x)
 这种机制会造成一些麻烦, 比如比较时, 细节可见115页, 更多细节见11章
 ___
 
-###视图
+##视图
 视图即虚拟表, 也称派生表, 因它们的内容都派生子其他表的查询结果, 基本表的内容是持久的而视图的内容是在使用时动态产生的
 ```sql
 create view name as select-stmt;
@@ -726,7 +726,7 @@ drop view name;
 通常关系数据库支持可更新的视图, 可以向其insert或者update, 修改会应用到底层表中, 但SQLite并不支持可更新视图, 不过可以用触发器达到类似的目的.
 ___
 
-###索引
+##索引
 索引是一种用来加速查询的结构.
 ```sql
 select * from foods where name='JujyFruit';
@@ -774,4 +774,219 @@ drop index index_name
     2. 而且索引会增加数据库的大小, 对表中所有字段创建索引, 可能会使得表的大小翻倍.
     3. 索引的维护是有代价的, 进行insert update delete时, 除了修改表, 也需要修改对应的索引. 虽然索引可以加快查询速度, 却会降低其他操作的速度.
 ___
-###触发器
+
+##触发器
+当具体的表发生特定的数据库事件时, 触发器执行对应的sql命令.
+创建触发器的语法:
+```sql
+create [temp|temporary] trigger name
+[before|after] [insert|delete|update|update of columns] on table
+action
+```
+触发器是通过名称, 行为和表定义的
+- 名称
+	上例的第一行就是名称定义的格式, 同时这里可以指定触发器是否为临时
+- 表
+	上例的第二行声明了触发器在某表的某些列发生某些事件的前或后触发
+- 行为
+	上例第二行以后的部分, 由一系列sql命令组成, 事件发生时触发器负责执行这些命令
+- 事件
+	insert, delete, update
+___
+###更新触发器
+insert, delete的触发器不同update触发器可以在表的执行字段上定义:
+```sql
+create trigger name
+[before|after] update of column on table
+action
+```
+```sql
+create temp table log(x);
+create temp trigger foods_update_log update of name on foods
+begin
+    insert into log values('update foods: new name=' || new.name);
+end;
+```
+SQLite在update触发器中, 提供对原行和已更新行的访问, 原行可引用为old, 已更新行可引用为new, 行的字段通过.号来引用
+___
+###错误处理
+定义为事件发生前执行的触发器有机会阻止事件的发生, 同样, 定义为事件发生后执行的触发器可以检查事件, 具备重新思考的机会
+before和after触发器可以实施新的完整性约束.
+SQLite提供一个特殊的raise()供触发器调用, 它用于在触发器内部产生错误
+```sql
+raise(resolution, error_message);
+```
+- 第一个参数是冲突解决策略
+	- abort
+	- fail
+	- ignore
+	- rollback
+	如果使用ignore, 当前触发器的剩余语句, 促使触发器执行的sql命令, 已经将被触发执行的触发器, 都将终止. 如果促使触发器执行的sql语句本身是另一个触发器的行为, 那么该触发器在触发行为的下一个SQL命令处继续执行.
+- 第二个参数是错误消息
+___
+###可更新的视图
+如前面所提到的, 可以用触发器来打造可更新的视图. SQLite支持视图触发器, 可以使用instead of代替触发器定义:
+```sql
+create view foods_view as
+select f.id fid, f.name fname, t.id tid, t.name tname
+from foods f, food_types t;
+
+create trigger on_update_foods_view
+instead of update on foods_view
+for each row
+begin
+	update foods set name=new.fname where id=new.fid;
+    update food_types set name=new.tname where id = new.tid;
+end;
+```
+___
+##事务
+- 原子性原则
+    事务定义了一组sql命令的边界, 这组命令或者作为一个整体被执行, 或者都不执行.
+    这被称为数据库完整性的原子性原则.
+- 实例
+	比如转账操作, 需要从一个帐户删除转账的数目, 然后向第二个账户插入, 如果发生崩溃或断电
+    这个操作就是不完整的, 双方都无法接受, 数据库也不一致了. 关键就是这两步操作必须同时执行或一个都不执行, 这就是事务的本质.
+###事务的范围
+事务由三个命令控制:
+- begin		开始一个事务, begin之后所有操作都可以取消
+- commit	提交事务开始后所执行的所有操作
+- rollback	回滚事务开始后的所有操作
+```sql
+begin;
+delete from foods;
+rollback;
+回滚了所有删除的行
+```
+**++默认情况下, SQLite中每条sql语句自成事务++**
+也就是说如果你没有使用begin...commit/rollback定义事务的范围,
+SQLite就默认每条语句都是有begin...commit/rollback的事务.
+++每条命令成功都自动提交, 失败都自动回滚++
+这种操作模式, 也称为自动提交模式
+
+- savepoint release
+	SQLite也支持savepoint和release命令, 以扩展事务的灵活性, 包含多个语句的工作体
+    可以设置savepoint, 回滚可以返回到某个savepoint,
+    ```sql
+    savepoint justincase
+    rollback to justincase
+    ```
+___
+
+##冲突解决
+违反约束会导致事务终止, 在对数据进行很多修改的过程中, 命令终止会造成什么后果. 大多数数据库都是简单将前面所做的修改全面取消.
+SQLite有其独特的方法允许指定不同的方式来处理约束违反(或者是说从约束违反中恢复), 这被称为**++冲突解决++**
+```sql
+update foods set id=800-id;
+SQL error: PRIMARY KEY must be unique
+```
+比如原来最后一条记录的主键是412
+当update执行到388个记录时, 试图将id更新为800-388=412, 而违反了惟一性约束.
+但在违反之前, 已经更新了387个记录, 应该如何处理?
+默认的行为是终止命令回滚所有修改, 保存事务完整性.
+也可以设置其他冲突解决方案来应对不同需求:
+- replace
+	当违反惟一性约束是, SQLite将造成这种违反的记录删除, 以插入或修改的新记录取代, sql继续执行, 且不报错. 如果违反not null使用该字段的默认值, 如果没有默认值, 应用abort策略.(但要注意, 当冲突解决策略删除违反的记录时, 不会触发触发器, 这种性质也许在以后可以得到解决)
+- ignore
+	当违反发生时, SQLite允许命令继续执行, 违反的行保持不变. 它之前和之后的记录都继续修改.
+- fail
+	当违反发生时, SQLite终止命令, 但是不恢复约束违反之前已经修改的记录.
+- abort
+	当违反发生时, SQLite终止命令, 恢复命令所做到所有改变. 这其实就是默认的冲突解决策略.
+- rollback
+	当违反发生时, SQLite执行回滚----终止当前命令和整个事务, 最终的结果就是当前命令的修改和事务中之前的修改都回滚, **++这是最严格的冲突解决方案, 单个约束造成整个事务的回滚++**
+冲突解决的语法:
+```sql
+insert or {replace|ignore|fail|abort|rollback} into table ...;
+update or {replace|ignore|fail|abort|rollback} table set...;
+```
+___
+##数据库锁
+文字描述很多,就不记了, 128页
+___
+##死锁
+多个连接到同个数据库 并发读写造成的 互相等待对方释放锁时 显然无限等待状况 130页
+目前的工作都是单连接的, 先不看
+___
+##事务的类型
+事务类型在begin命令中指定
+```sql
+begin  [deferred | immediate | exclusive] transaction;
+```
+一共三类:
+1. deferred
+	延迟到必须使用时才获取锁, 这也是默认的情况
+2. immediate
+	在begin时就立即尝试获取预留锁, 如果成功, 可以阻止其他连接获取新的读锁
+3. exclusive
+	在begin尝试获取拍它锁, 如果成功, 保证数据库中没有其他的连接
+___
+
+##数据库管理
+数据库管理一般用于控制数据库如何操作. 需要执行的许多数据库管理任务都可以通过sql命令完成
+
+###附加数据库
+SQLite允许通过attach命令将多个数据库附加到当前连接. 当附加了一个数据库后, 他的所有内容在当前数据库文件的全局范围内都是可以访问的. attach的语法:
+```sql
+attach [database] filename as database_name;
+```
+- 附加成功后database_name成为要引用的数据库的逻辑名
+- 原来的数据库(主数据库)自动赋名为main
+- 所有临时表现在会被放在一个名为temp的附加数据库
+- 访问数据库的表需要用database_name.table
+
+可以用detach database命令来将数据库分离:
+```sql
+detach [database] database_name;
+```
+
+___
+###数据库清理
+SQLite有两个命令用于清理数据库
+- reindex
+	```sql
+    reindex collation_name; 重建所有使用指定排序名称的索引
+    reindex table_name | index_name; 重建指定的索引 或某表的索引
+    ```
+- vacuum
+	通过重构数据库文件, 清理未使用的空间
+___
+###数据库配置
+SQLite没有配置文件, 它的所有配置参数都用编译指示(pragma)来实现.
+编译指示, 以独特的方式工作, 有时像变量, 有时像命令.
+- 连接缓冲区大小
+	控制一个连接在内存中可以使用多少个数据库页
+    ```sql
+    pragma cache_size;
+    cache_size
+    2000
+    pragma cache_size=1000;
+    ```
+- 获取数据库信息
+	1. database_list 	列出所有附着的数据库
+	2. index_info		列出索引内字段信息, 参数是索引名
+    3. index_list		列出表中的索引, 参数是表名
+    4. table_info		列出表中所有字段信息
+___
+###写同步
+通常情况, SQLite会在关键时候将所有变化提交到磁盘以确保事务的持久性. 这与其他数据库中的检查点功能类似. 可以通过synchronous命令对写同步进行配置:
+- full
+	SQLite在继续前, 在关键点暂停以确保所有数据都写入磁盘, 这保证了即使系统崩溃或断电, 重启后数据库仍然是无损的.
+- nomal
+	SQLite会在大多数关键点暂停, 但没有full模式频繁. normal模式中某个凑巧时刻电力终端可能导致数据库, 虽然这个概率非常小.
+- off
+	SQLite将数据抛给操作系统后立即继续操作, 这样可以加速达50倍. 如果运行SQLite的应用崩溃, 数据依然安全, 如果操作系统崩溃或断电, 数据库可能会毁损.
+___
+###临时存储器
+顾名思义就是SQLite保存临时性数据的地方, 如果临时表, 临时索引或其他对象.有两个编译指示控制临时存储器:
+- temp_store
+	指示SQLite用内存还是文件作为临时存储器
+    - default
+    - file
+    - memory
+- temp_store_directory
+	就是指的存放临时文件的目录
+___
+###页大小 编码 自动清理 调试 查看查询计划
+现在用不到, 先占位
+___
